@@ -9,7 +9,7 @@ errfix is a command-line tool that replaces go's native error with the call-stac
 
 ## Install
 
-    go install github.com/yaoguais/errfix/cmd/errfix@master
+    go install github.com/yaoguais/errfix/cmd/errfix@latest
 
 ## Usage
 
