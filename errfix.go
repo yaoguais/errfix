@@ -227,6 +227,7 @@ type pkgErrorsDstProcessor struct {
 	errorfIdent    string
 	wrapfIdent     string
 	errIdent       string
+	nilIdent       string
 	changed        bool
 }
 
@@ -240,6 +241,7 @@ func newPkgErrorsDstProcessor() *pkgErrorsDstProcessor {
 		errorfIdent:    "Errorf",
 		wrapfIdent:     "Wrapf",
 		errIdent:       "err",
+		nilIdent:       "nil",
 	}
 }
 
@@ -249,7 +251,7 @@ func (p *pkgErrorsDstProcessor) Process(ctx context.Context, n dst.Node) (err er
 	case *dst.ReturnStmt:
 		changed = p.fixReturnStmt(n)
 	case *dst.IfStmt:
-		changed = p.fixIfStmtCompareError(n)
+		changed = p.fixIfStmt(n)
 	case *dst.TypeAssertExpr:
 		changed = p.fixTypeAssertExpr(n)
 	case *dst.CallExpr:
@@ -302,21 +304,42 @@ func (p pkgErrorsDstProcessor) fixReturnStmt(n *dst.ReturnStmt) (changed bool) {
 	return true
 }
 
-func (p pkgErrorsDstProcessor) fixIfStmtCompareError(n *dst.IfStmt) (changed bool) {
-	// if stmt; err == something-but-not-nil
-	// ->
-	// if stmt; errors.Cause(err) == something-but-not-nil
+func (p pkgErrorsDstProcessor) fixIfStmt(n *dst.IfStmt) (changed bool) {
 	cond, ok := n.Cond.(*dst.BinaryExpr)
 	if !ok {
 		return
 	}
-	ok = isName(cond.X, p.errIdent) && (cond.Op == token.EQL || cond.Op == token.NEQ) &&
-		!isName(cond.Y, "nil")
-	if !ok {
-		return
+
+	compareErr := func(cond *dst.BinaryExpr, yIsNil bool) bool {
+		ok := isName(cond.X, p.errIdent) && (cond.Op == token.EQL || cond.Op == token.NEQ)
+		if !ok {
+			return false
+		}
+		ok = (yIsNil && isName(cond.Y, p.nilIdent)) || (!yIsNil && !isName(cond.Y, p.nilIdent))
+		return ok
 	}
-	cond.X = p.causeExpr()
-	return true
+
+	// if stmt; err == something-but-not-nil
+	// ->
+	// if stmt; errors.Cause(err) == something-but-not-nil
+	if compareErr(cond, false) {
+		cond.X = p.causeExpr()
+		return true
+	}
+	// if stmt; err != nil && err != something-but-not-nil
+	// ->
+	// if stmt; err != nil && errors.Cause(err) != something-but-not-nil
+	condX, okX := cond.X.(*dst.BinaryExpr)
+	condY, okY := cond.Y.(*dst.BinaryExpr)
+	ok = (cond.Op == token.LAND || cond.Op == token.LOR) &&
+		(okX && compareErr(condX, true)) &&
+		(okY && compareErr(condY, false))
+	if ok {
+		condY.X = p.causeExpr()
+		return true
+	}
+
+	return
 }
 
 func (p pkgErrorsDstProcessor) fixTypeAssertExpr(n *dst.TypeAssertExpr) (changed bool) {

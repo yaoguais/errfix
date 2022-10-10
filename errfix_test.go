@@ -244,6 +244,12 @@ func foo() error {
 	if err == ErrNotFound {
 		return nil
 	}
+	if err != nil && err != ErrNotFound {
+		return nil
+	}
+	if err != nil && err == ErrNotFound {
+		return nil
+	}
 	return err
 }
 `,
@@ -265,6 +271,12 @@ func foo() error {
 		return errors.WithStack(err)
 	}
 	if errors.Cause(err) == ErrNotFound {
+		return nil
+	}
+	if err != nil && errors.Cause(err) != ErrNotFound {
+		return nil
+	}
+	if err != nil && errors.Cause(err) == ErrNotFound {
 		return nil
 	}
 	return errors.WithStack(err)
